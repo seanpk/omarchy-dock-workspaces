@@ -1,5 +1,7 @@
 # Dock Workspaces
 
+![Dock Workspaces settings](preview.png)
+
 When you plug in an external display, Hyprland usually leaves your windows on the laptop panel and gives the new screen an empty workspace.
 
 This plugin sends workspaces to the primary display on connect, except ones you created or filled on the laptop during the last dual-monitor session. Unplug still piles everything onto the laptop. Plug back in and that split comes back; anything you started while undocked goes to the primary.
