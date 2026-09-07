@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "seanpk.dock-workspaces",
+  "name": "Dock Workspaces",
+  "version": "1.0.0",
+  "author": "Sean Kennedy",
+  "license": "MIT",
+  "description": "When an external display is plugged in, send workspaces to it — except ones you created or filled on the laptop during the last dual-monitor session.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Dock Workspaces",
+    "description": "Restore workspaces onto the primary display on dock, keeping laptop-owned ones put.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
