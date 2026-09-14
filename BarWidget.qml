@@ -37,10 +37,6 @@ BarWidget {
   onBarChanged: injectPanel()
   onSettingsChanged: injectPanel()
 
-  HyprlandSync {
-    id: sync
-  }
-
   Loader {
     id: panelLoader
     active: true
@@ -62,6 +58,4 @@ BarWidget {
       if (code === Qt.LeftButton) root.toggle()
     }
   }
-
-  Component.onCompleted: sync.ensureLoader()
 }

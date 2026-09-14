@@ -30,11 +30,35 @@ Panel {
   readonly property var monitors: Hyprland.monitors ? Hyprland.monitors.values : []
 
   function open() { root.controller.show() }
+
+  onOpenedChanged: {
+    if (!opened)
+      return
+    files.run("read-config", "", root._applyConfig)
+    files.run("read-state", "", root._applyState)
+    sync.checkLoader()
+  }
   function close() { root.controller.hide() }
   function switchPanel(direction) {
     if (root.bar && typeof root.bar.switchPanelFrom === "function")
       return root.bar.switchPanelFrom(root.hostWidget || root, direction)
     return false
+  }
+
+  function _applyConfig(ok, status, body) {
+    if (!ok && status !== "MISSING") {
+      root.config = Model.defaultConfig()
+      return
+    }
+    root.config = Model.parseConfig(status === "MISSING" ? "" : body)
+  }
+
+  function _applyState(ok, status, body) {
+    if (!ok && status !== "MISSING") {
+      root.affinityIds = []
+      return
+    }
+    root.affinityIds = Model.parseAffinityIds(status === "MISSING" ? "" : body)
   }
 
   function save(patch) {
@@ -46,10 +70,19 @@ Panel {
     }
     for (var key in patch) next[key] = patch[key]
     config = Model.parseConfig(JSON.stringify(next))
-    configFile.setText(Model.serializeConfig(config))
+    files.run("write-config", Model.serializeConfig(config), function (ok) {
+      if (!ok)
+        sync.lastError = files.lastError || "could not save settings"
+    })
   }
 
   function statusText() {
+    if (sync.loaderStatus === "missing-file")
+      return "hyprland.lua was not found. Dock Workspaces cannot load into Hyprland."
+    if (sync.loaderMalformed)
+      return "The Dock Workspaces block in hyprland.lua is damaged. It will not be rewritten."
+    if (!sync.loaderInstalled)
+      return "Hyprland loader is off. Jump on connect does nothing until you add it."
     if (!config.enabled) return "Paused. Workspaces stay where Hyprland puts them."
     var laptop = laptopMonitor()
     var primary = primaryMonitor()
@@ -99,25 +132,32 @@ Panel {
     return affinityIds.join(", ")
   }
 
+  FileHelper {
+    id: files
+  }
+
+  HyprlandSync {
+    id: sync
+  }
+
   FileView {
     id: configFile
-    path: root.configPath
+    preload: false
+    blockAllReads: true
     watchChanges: true
-    atomicWrites: true
     printErrors: false
-    onFileChanged: reload()
-    onLoaded: root.config = Model.parseConfig(text())
-    onLoadFailed: root.config = Model.defaultConfig()
+    path: root.configPath
+    onFileChanged: files.run("read-config", "", root._applyConfig)
   }
 
   FileView {
     id: affinityFile
-    path: root.affinityPath
+    preload: false
+    blockAllReads: true
     watchChanges: true
     printErrors: false
-    onFileChanged: reload()
-    onLoaded: root.affinityIds = Model.parseAffinityIds(text())
-    onLoadFailed: root.affinityIds = []
+    path: root.affinityPath
+    onFileChanged: files.run("read-state", "", root._applyState)
   }
 
   KeyboardPanel {
@@ -144,6 +184,7 @@ Panel {
         Text {
           width: parent.width
           text: "Dock Workspaces"
+          textFormat: Text.PlainText
           color: root.fg
           font.family: root.fontFamily
           font.pixelSize: Style.font.title
@@ -154,9 +195,43 @@ Panel {
           width: parent.width
           wrapMode: Text.WordWrap
           text: root.statusText()
+          textFormat: Text.PlainText
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
+        }
+
+        Text {
+          width: parent.width
+          visible: sync.lastError !== ""
+          wrapMode: Text.WordWrap
+          text: sync.lastError
+          textFormat: Text.PlainText
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+
+        Button {
+          width: parent.width
+          visible: !sync.loaderInstalled && !sync.loaderMalformed
+          text: "Add Hyprland loader"
+          bordered: true
+          foreground: root.fg
+          fontFamily: root.fontFamily
+          enabled: !sync.busy && sync.loaderStatus !== "missing-file"
+          onClicked: sync.installLoader()
+        }
+
+        Button {
+          width: parent.width
+          visible: sync.loaderInstalled
+          text: "Remove Hyprland loader"
+          bordered: true
+          foreground: root.fg
+          fontFamily: root.fontFamily
+          enabled: !sync.busy
+          onClicked: sync.removeLoader()
         }
 
         Toggle {
@@ -212,6 +287,7 @@ Panel {
           width: parent.width
           wrapMode: Text.WordWrap
           text: root.affinityText()
+          textFormat: Text.PlainText
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption

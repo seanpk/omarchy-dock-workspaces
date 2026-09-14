@@ -42,6 +42,31 @@ test("loader install is idempotent and reversible", () => {
   assert.equal(once.includes("seanpk.dock-workspaces"), true)
   assert.equal(once.includes("dock-workspaces.lua"), true)
   assert.equal(Model.needsLoader(once), false)
+  assert.equal(Model.loaderState(once), "present")
   assert.equal(Model.withoutLoader(once).includes("seanpk.dock-workspaces"), false)
   assert.equal(Model.withoutLoader(once).includes("require(\"hypr.monitors\")"), true)
+})
+
+test("loader rewrite refuses duplicate or partial markers", () => {
+  const duplicate = [
+    "require(\"hypr.monitors\")",
+    Model.loaderBlock(),
+    Model.loaderBlock(),
+    ""
+  ].join("\n")
+  assert.equal(Model.loaderState(duplicate), "malformed")
+  assert.equal(Model.withLoader(duplicate), duplicate)
+  assert.equal(Model.withoutLoader(duplicate), duplicate)
+
+  const partial = "require(\"hypr.monitors\")\n-- seanpk.dock-workspaces start\n"
+  assert.equal(Model.loaderState(partial), "malformed")
+  assert.equal(Model.withoutLoader(partial), partial)
+})
+
+test("plainLabel strips markup and controls", () => {
+  assert.equal(Model.plainLabel("<img src=x>BenQ", 80), "img src=xBenQ")
+  assert.equal(
+    Model.monitorLabel({ name: "DP-3", description: "<b>BenQ</b>" }),
+    "bBenQ/b (DP-3)"
+  )
 })

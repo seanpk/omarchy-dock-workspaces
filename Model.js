@@ -23,8 +23,8 @@ function parseConfig(text) {
   return {
     version: 1,
     enabled: parsed.enabled !== false,
-    laptop: String(parsed.laptop == null ? "" : parsed.laptop),
-    primary: String(parsed.primary == null ? "" : parsed.primary)
+    laptop: String(parsed.laptop == null ? "" : parsed.laptop).slice(0, 200),
+    primary: String(parsed.primary == null ? "" : parsed.primary).slice(0, 200)
   }
 }
 
@@ -44,8 +44,9 @@ function isInternalName(name) {
 
 function selectorFor(mon) {
   if (!mon) return ""
-  var name = String(mon.name || "")
+  var name = String(mon.name || "").replace(/[\0\r\n]/g, "").slice(0, 64)
   var desc = String(mon.description || "").replace(/\s*\([^)]*\)\s*$/, "").trim()
+  desc = desc.replace(/[\0\r\n]/g, "").slice(0, 200)
   if (isInternalName(name)) return name
   if (desc) return "desc:" + desc
   return name
@@ -53,8 +54,8 @@ function selectorFor(mon) {
 
 function monitorLabel(mon) {
   if (!mon) return ""
-  var name = String(mon.name || "")
-  var desc = String(mon.description || "").trim()
+  var name = plainLabel(mon.name, 64)
+  var desc = plainLabel(String(mon.description || "").trim(), 80)
   return desc ? desc + " (" + name + ")" : name
 }
 
@@ -62,14 +63,28 @@ function parseAffinityIds(text) {
   var ids = []
   var seen = {}
   String(text || "").split(/\n/).forEach(function (line) {
+    if (ids.length >= 64) return
     var n = parseInt(String(line).trim(), 10)
-    if (n > 0 && !seen[n]) {
+    if (n > 0 && n <= 99999 && !seen[n]) {
       seen[n] = true
       ids.push(n)
     }
   })
   ids.sort(function (a, b) { return a - b })
   return ids
+}
+
+function plainLabel(value, maxLen) {
+  var max = maxLen || 120
+  var text = String(value || "")
+  var out = ""
+  for (var i = 0; i < text.length && out.length < max; i++) {
+    var code = text.charCodeAt(i)
+    if (code === 60 || code === 62 || code === 38) continue
+    if (code < 32 || code === 127) continue
+    out += text.charAt(i)
+  }
+  return out
 }
 
 function loaderBlock() {
@@ -85,19 +100,49 @@ function loaderBlock() {
   ].join("\n")
 }
 
+function loaderState(hyprlandLua) {
+  var text = String(hyprlandLua || "")
+  var beginCount = 0
+  var endCount = 0
+  var i = 0
+  while (true) {
+    var found = text.indexOf(LOADER_BEGIN, i)
+    if (found === -1) break
+    beginCount += 1
+    i = found + LOADER_BEGIN.length
+  }
+  i = 0
+  while (true) {
+    var found = text.indexOf(LOADER_END, i)
+    if (found === -1) break
+    endCount += 1
+    i = found + LOADER_END.length
+  }
+  if (beginCount === 0 && endCount === 0) return "absent"
+  if (beginCount !== 1 || endCount !== 1) return "malformed"
+  var begin = text.indexOf(LOADER_BEGIN)
+  var end = text.indexOf(LOADER_END)
+  if (end < begin) return "malformed"
+  var expected = loaderBlock()
+  var actual = text.slice(begin, end + LOADER_END.length)
+  if (actual !== expected) return "malformed"
+  return "present"
+}
+
 function needsLoader(hyprlandLua) {
-  return String(hyprlandLua || "").indexOf(PLUGIN_ID) === -1
+  return loaderState(hyprlandLua) === "absent"
 }
 
 function withLoader(hyprlandLua) {
   var text = String(hyprlandLua || "")
-  if (!needsLoader(text)) return text
+  if (loaderState(text) !== "absent") return text
   var separator = text.length === 0 || /\n\s*$/.test(text) ? "\n" : "\n\n"
   return text + separator + loaderBlock() + "\n"
 }
 
 function withoutLoader(hyprlandLua) {
   var text = String(hyprlandLua || "")
+  if (loaderState(text) !== "present") return text
   var stripped = text.replace(
     /\n?-- seanpk\.dock-workspaces start[\s\S]*?-- seanpk\.dock-workspaces end\n?/,
     "\n"
@@ -115,7 +160,9 @@ if (typeof module !== "undefined") {
     selectorFor: selectorFor,
     monitorLabel: monitorLabel,
     parseAffinityIds: parseAffinityIds,
+    plainLabel: plainLabel,
     loaderBlock: loaderBlock,
+    loaderState: loaderState,
     needsLoader: needsLoader,
     withLoader: withLoader,
     withoutLoader: withoutLoader

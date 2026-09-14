@@ -2,34 +2,80 @@
 -- display unless they were created or given windows on the laptop during
 -- the last dual-monitor session.
 
-local function env_or(name, fallback)
-  local value = os.getenv(name)
-  if value == nil or value == "" then
-    return fallback
-  end
-  return value
-end
-
-local home = os.getenv("HOME") or ""
-local config_home = env_or("XDG_CONFIG_HOME", home .. "/.config")
-local state_home = env_or("XDG_STATE_HOME", home .. "/.local/state")
-local SETTINGS_FILE = config_home .. "/omarchy/dock-workspaces.json"
-local STATE_DIR = state_home .. "/omarchy"
-local STATE_FILE = STATE_DIR .. "/dock-workspaces-laptop-ids"
-local LEGACY_STATE_FILE = STATE_DIR .. "/workspace-laptop-affinity"
-
 local laptop_ids = {}
 local restoring = false
 local restore_timer = nil
 
-local function read_file(path)
-  local file = io.open(path, "r")
-  if not file then
+local ALLOWED_OPS = {
+  ["read-config"] = true,
+  ["read-state"] = true,
+  ["write-state"] = true,
+}
+
+local function plugin_root()
+  local src = debug.getinfo(1, "S").source
+  if type(src) ~= "string" or src:sub(1, 1) ~= "@" then
     return nil
   end
-  local text = file:read("*a") or ""
-  file:close()
-  return text
+  local lua_path = src:sub(2)
+  if not lua_path:match("^/[%w._/-]+$") or lua_path:find("..", 1, true) then
+    return nil
+  end
+  return lua_path:match("^(.*)/hypr/dock%-workspaces%.lua$")
+end
+
+local function shell_quote(value)
+  return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
+end
+
+local function helper_request(op, stdin_text, max_bytes)
+  if not ALLOWED_OPS[op] then
+    return nil, "refused"
+  end
+  local root = plugin_root()
+  if not root then
+    return nil, "refused"
+  end
+  local script = root .. "/bin/safe-file.py"
+  if not script:match("^/[%w._/-]+$") or script:find("..", 1, true) then
+    return nil, "refused"
+  end
+  local cmd
+  if stdin_text ~= nil then
+    if not stdin_text:match("^[%d\n]*$") or #stdin_text > max_bytes then
+      return nil, "refused"
+    end
+    cmd = string.format(
+      "/usr/bin/python3 -I -S -- %s %s <<'DOCK_WORKSPACES_EOF'\n%sDOCK_WORKSPACES_EOF",
+      shell_quote(script),
+      op,
+      stdin_text
+    )
+  else
+    cmd = "/usr/bin/python3 -I -S -- " .. shell_quote(script) .. " " .. op
+  end
+  local pipe = io.popen(cmd, "r")
+  if not pipe then
+    return nil, "refused"
+  end
+  local chunk = pipe:read(max_bytes + 32) or ""
+  pipe:close()
+  local nl = chunk:find("\n", 1, true)
+  if not nl then
+    return nil, "refused"
+  end
+  local header = chunk:sub(1, nl - 1)
+  local body = chunk:sub(nl + 1)
+  if #body > max_bytes then
+    return nil, "refused"
+  end
+  if header == "OK" then
+    return body
+  end
+  if header == "MISSING" then
+    return nil, "missing"
+  end
+  return nil, "refused"
 end
 
 local function json_string(text, key)
@@ -37,7 +83,11 @@ local function json_string(text, key)
 end
 
 local function read_settings()
-  local text = read_file(SETTINGS_FILE) or ""
+  local text, err = helper_request("read-config", nil, 8192)
+  if err == "refused" then
+    return { enabled = false, laptop = "", primary = "" }
+  end
+  text = text or ""
   return {
     enabled = not text:find('"enabled"%s*:%s*false'),
     laptop = json_string(text, "laptop"),
@@ -108,36 +158,36 @@ end
 
 local function load_ids()
   laptop_ids = {}
-  local text = read_file(STATE_FILE)
-  if text == nil then
-    text = read_file(LEGACY_STATE_FILE)
-  end
-  if text == nil then
+  local text, err = helper_request("read-state", nil, 4096)
+  if err == "refused" or text == nil then
     return
   end
+  local count = 0
   for line in string.gmatch(text, "[^\r\n]+") do
     local id = tonumber(line)
-    if id then
+    if id and id > 0 and id <= 99999 then
       laptop_ids[id] = true
+      count = count + 1
+      if count >= 64 then
+        break
+      end
     end
   end
 end
 
 local function save_ids()
-  os.execute("mkdir -p '" .. STATE_DIR:gsub("'", "'\\''") .. "'")
-  local file = io.open(STATE_FILE, "w")
-  if not file then
-    return
-  end
   local ids = {}
   for id in pairs(laptop_ids) do
-    table.insert(ids, id)
+    if type(id) == "number" and id > 0 and id <= 99999 then
+      table.insert(ids, id)
+    end
   end
   table.sort(ids)
-  for _, id in ipairs(ids) do
-    file:write(tostring(id) .. "\n")
+  if #ids > 64 then
+    return
   end
-  file:close()
+  local payload = #ids == 0 and "" or (table.concat(ids, "\n") .. "\n")
+  helper_request("write-state", payload, 4096)
 end
 
 local function remember(ws, mon)
