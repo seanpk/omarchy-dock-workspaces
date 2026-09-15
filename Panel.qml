@@ -23,6 +23,9 @@ Panel {
 
   property var config: Model.defaultConfig()
   property var affinityIds: []
+  readonly property bool loaderInstalled: sync.loaderInstalled
+  readonly property bool loaderChecked: sync.loaderChecked
+  readonly property string hyprlandLuaPath: configDir + "/hypr/hyprland.lua"
 
   readonly property color fg: bar ? bar.foreground : Color.foreground
   readonly property color dim: Color.muted
@@ -30,6 +33,8 @@ Panel {
   readonly property var monitors: Hyprland.monitors ? Hyprland.monitors.values : []
 
   function open() { root.controller.show() }
+
+  Component.onCompleted: sync.checkLoader()
 
   onOpenedChanged: {
     if (!opened)
@@ -138,6 +143,16 @@ Panel {
 
   HyprlandSync {
     id: sync
+  }
+
+  FileView {
+    id: hyprlandLuaFile
+    preload: false
+    blockAllReads: true
+    watchChanges: true
+    printErrors: false
+    path: root.hyprlandLuaPath
+    onFileChanged: sync.checkLoader()
   }
 
   FileView {

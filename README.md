@@ -12,7 +12,7 @@ This plugin sends workspaces to the primary display on connect, except ones you 
 omarchy plugin add https://github.com/seanpk/omarchy-dock-workspaces.git --enable
 ```
 
-That installs the bar widget. It does not edit Hyprland config. Jump on connect needs a Hyprland loader; add it from the settings panel, or run:
+That puts the widget on the bar. It does not edit Hyprland config, so jump on connect stays off until you add the loader. The icon shows a badge until that is done. Open the icon and click **Add Hyprland loader**, or run:
 
 ```sh
 ~/.config/omarchy/plugins/seanpk.dock-workspaces/bin/install-loader
