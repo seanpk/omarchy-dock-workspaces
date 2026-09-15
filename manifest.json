@@ -6,6 +6,7 @@
   "author": "Sean Kennedy",
   "license": "MIT",
   "description": "When an external display is plugged in, send workspaces to it — except ones you created or filled on the laptop during the last dual-monitor session.",
+  "postEnable": "Jump on connect needs a Hyprland loader. Open the bar icon and click Add Hyprland loader, or run:\n  ~/.config/omarchy/plugins/seanpk.dock-workspaces/bin/install-loader",
   "kinds": [
     "bar-widget"
   ],

@@ -12,9 +12,13 @@ This plugin sends workspaces to the primary display on connect, except ones you 
 omarchy plugin add https://github.com/seanpk/omarchy-dock-workspaces.git --enable
 ```
 
-That installs the bar widget. It does not edit Hyprland config.
+That installs the bar widget. It does not edit Hyprland config. Jump on connect needs a Hyprland loader; add it from the settings panel, or run:
 
-Open the bar icon and click **Add Hyprland loader**. That appends one guarded `dofile` to `~/.config/hypr/hyprland.lua`, after a same-directory atomic write. The line only loads the plugin while this checkout exists, so removing the plugin cannot break Hyprland.
+```sh
+~/.config/omarchy/plugins/seanpk.dock-workspaces/bin/install-loader
+```
+
+That appends one guarded `dofile` to `~/.config/hypr/hyprland.lua`, after a same-directory atomic write. The line only loads the plugin while this checkout exists, so removing the plugin cannot break Hyprland.
 
 It does not edit `monitors.lua`. Place the external display yourself (above, beside, primary, scale).
 
@@ -35,7 +39,13 @@ Move a workspace onto the laptop with Super+Shift+Alt and an arrow. Opening a wi
 omarchy plugin remove seanpk.dock-workspaces
 ```
 
-That deletes the plugin checkout. If you added the loader, click **Remove Hyprland loader** first, or delete the block between `-- seanpk.dock-workspaces start` and `-- seanpk.dock-workspaces end` in `~/.config/hypr/hyprland.lua`. A leftover guarded line is a no-op once the checkout is gone.
+That deletes the plugin checkout. If you added the loader, click **Remove Hyprland loader** first, or run:
+
+```sh
+~/.config/omarchy/plugins/seanpk.dock-workspaces/bin/remove-loader
+```
+
+A leftover guarded line is a no-op once the checkout is gone. To delete it by hand, remove the block between `-- seanpk.dock-workspaces start` and `-- seanpk.dock-workspaces end` in `~/.config/hypr/hyprland.lua`.
 
 Optional leftovers:
 

@@ -13,6 +13,7 @@ import pwd
 import re
 import secrets
 import stat
+import subprocess
 import sys
 
 HYPRLAND_MAX = 1048576
@@ -36,6 +37,7 @@ _OPS = {
     "read-state": "read",
     "write-state": "write",
 }
+_CLI_OPS = ("install-loader", "remove-loader", "status-loader")
 
 
 def _ok_component(name: str) -> bool:
@@ -257,6 +259,151 @@ def validate_hyprland(text: str) -> str:
     return text
 
 
+def loader_block() -> str:
+    return "\n".join(
+        [
+            LOADER_BEGIN,
+            "do",
+            '  local path = (os.getenv("XDG_CONFIG_HOME") or (os.getenv("HOME") .. "/.config"))',
+            '    .. "/omarchy/plugins/seanpk.dock-workspaces/hypr/dock-workspaces.lua"',
+            '  local file = io.open(path, "r")',
+            "  if file then file:close(); dofile(path) end",
+            "end",
+            LOADER_END,
+        ]
+    )
+
+
+def loader_state(text: str) -> str:
+    begin_count = text.count(LOADER_BEGIN)
+    end_count = text.count(LOADER_END)
+    if begin_count == 0 and end_count == 0:
+        return "absent"
+    if begin_count != 1 or end_count != 1:
+        return "malformed"
+    begin = text.find(LOADER_BEGIN)
+    end = text.find(LOADER_END)
+    if end < begin:
+        return "malformed"
+    actual = text[begin : end + len(LOADER_END)]
+    if actual != loader_block():
+        return "malformed"
+    return "present"
+
+
+def with_loader(text: str) -> str:
+    if loader_state(text) != "absent":
+        return text
+    separator = "\n" if (text == "" or re.search(r"\n\s*$", text)) else "\n\n"
+    return text + separator + loader_block() + "\n"
+
+
+def without_loader(text: str) -> str:
+    if loader_state(text) != "present":
+        return text
+    stripped = re.sub(
+        r"\n?-- seanpk\.dock-workspaces start[\s\S]*?-- seanpk\.dock-workspaces end\n?",
+        "\n",
+        text,
+        count=1,
+    )
+    return re.sub(r"\n{3,}", "\n\n", stripped)
+
+
+def _hyprctl(*args: str) -> tuple[int, str]:
+    try:
+        proc = subprocess.run(
+            ["/usr/bin/hyprctl", *args],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as err:
+        return 1, str(err)[:200]
+    out = (proc.stdout + proc.stderr)[:4096]
+    return proc.returncode, out.decode("utf-8", "replace")
+
+
+def _reload_hyprland() -> tuple[bool, str]:
+    code, message = _hyprctl("reload")
+    if code != 0:
+        return False, message.strip()
+    _code, errors = _hyprctl("configerrors")
+    text = errors.strip()
+    if text and text != "ok":
+        return False, text
+    return True, ""
+
+
+def cli_status_loader() -> int:
+    data = read_hyprland()
+    if data is None:
+        print("hyprland.lua not found", file=sys.stderr)
+        return 1
+    state = loader_state(_decode(data))
+    if state == "present":
+        print("Hyprland loader is installed.")
+        return 0
+    if state == "absent":
+        print("Hyprland loader is not installed.")
+        return 0
+    print("hyprland.lua has a damaged Dock Workspaces block; not rewriting it", file=sys.stderr)
+    return 1
+
+
+def cli_install_loader() -> int:
+    data = read_hyprland()
+    if data is None:
+        print("hyprland.lua not found", file=sys.stderr)
+        return 1
+    text = _decode(data)
+    state = loader_state(text)
+    if state == "present":
+        print("Hyprland loader is already installed.")
+        return 0
+    if state != "absent":
+        print("hyprland.lua has a damaged Dock Workspaces block; not rewriting it", file=sys.stderr)
+        return 1
+    write_hyprland(with_loader(text))
+    ok, err = _reload_hyprland()
+    if not ok:
+        write_hyprland(text)
+        _reload_hyprland()
+        print("Hyprland rejected the loader; restored the previous hyprland.lua", file=sys.stderr)
+        if err:
+            print(err[:200], file=sys.stderr)
+        return 1
+    print("Added the Dock Workspaces loader to hyprland.lua.")
+    return 0
+
+
+def cli_remove_loader() -> int:
+    data = read_hyprland()
+    if data is None:
+        print("hyprland.lua not found", file=sys.stderr)
+        return 1
+    text = _decode(data)
+    state = loader_state(text)
+    if state == "absent":
+        print("Hyprland loader is not installed.")
+        return 0
+    if state != "present":
+        print("hyprland.lua has a damaged Dock Workspaces block; not rewriting it", file=sys.stderr)
+        return 1
+    write_hyprland(without_loader(text))
+    ok, err = _reload_hyprland()
+    if not ok:
+        write_hyprland(text)
+        _reload_hyprland()
+        print("Hyprland rejected the removal; restored the previous hyprland.lua", file=sys.stderr)
+        if err:
+            print(err[:200], file=sys.stderr)
+        return 1
+    print("Removed the Dock Workspaces loader from hyprland.lua.")
+    return 0
+
+
 def _read_named(parts: list[str], name: str, max_bytes: int, create_missing: bool) -> bytes | None:
     dirfd = open_dir_chain(parts, create_missing=create_missing, tighten_leaf=False)
     try:
@@ -359,9 +506,29 @@ def _read_stdin(max_bytes: int) -> bytes:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2 or argv[1] not in _OPS:
+    if len(argv) != 2:
         return 2
     op = argv[1]
+    if op in _CLI_OPS:
+        try:
+            if op == "install-loader":
+                return cli_install_loader()
+            if op == "remove-loader":
+                return cli_remove_loader()
+            if op == "status-loader":
+                return cli_status_loader()
+            return 2
+        except FileNotFoundError:
+            print("hyprland.lua not found", file=sys.stderr)
+            return 1
+        except PermissionError:
+            print("refusing to touch hyprland.lua", file=sys.stderr)
+            return 4
+        except (ValueError, UnicodeDecodeError, OSError):
+            print("refusing to touch hyprland.lua", file=sys.stderr)
+            return 4
+    if op not in _OPS:
+        return 2
     try:
         if op == "read-hyprland":
             data = read_hyprland()

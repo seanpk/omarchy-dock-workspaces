@@ -2,6 +2,7 @@
 import importlib.util
 import os
 import stat
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -100,6 +101,21 @@ class SafeFileTests(unittest.TestCase):
             sf.validate_hyprland(
                 "-- seanpk.dock-workspaces start\n-- seanpk.dock-workspaces start\n"
             )
+
+    def test_loader_matches_model_and_is_reversible(self):
+        js = subprocess.check_output(
+            ["node", "-e", "const M=require('./Model.js'); process.stdout.write(M.loaderBlock())"],
+            cwd=ROOT,
+        ).decode("utf-8")
+        self.assertEqual(sf.loader_block(), js)
+        original = 'require("hypr.monitors")\n'
+        once = sf.with_loader(original)
+        self.assertEqual(sf.loader_state(once), "present")
+        self.assertEqual(sf.with_loader(once), once)
+        self.assertEqual(sf.without_loader(once).find("seanpk.dock-workspaces"), -1)
+        duplicate = once + "\n" + sf.loader_block() + "\n"
+        self.assertEqual(sf.loader_state(duplicate), "malformed")
+        self.assertEqual(sf.without_loader(duplicate), duplicate)
 
 
 if __name__ == "__main__":
